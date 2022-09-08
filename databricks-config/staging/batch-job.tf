@@ -1,6 +1,7 @@
 resource "databricks_job" "batch_inference_job" {
   name = "${local.env_prefix}yang-mlops-project-batch-inference-job"
 
+  # Yang test
   # Optional validation: we include it here for convenience, to help ensure that the job references a notebook
   # that exists in the current repo. Note that Terraform >= 1.2 is required to use these validations
   lifecycle {
