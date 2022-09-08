@@ -1,0 +1,52 @@
+name: ML Code Integration Tests for yang-mlops-project
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths-ignore:
+      - 'databricks-config/**'
+
+env:
+  DATABRICKS_HOST: https://adb-8405830731420074.14.azuredatabricks.net
+  NODE_TYPE_ID: Standard_D3_v2
+  
+jobs:
+  staging:
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+      - name: Generate AAD Token
+        run: ./.github/workflows/scripts/generate-aad-token.sh ${{ secrets.STAGING_AZURE_SP_TENANT_ID }} ${{ secrets.STAGING_AZURE_SP_APPLICATION_ID }} ${{ secrets.STAGING_AZURE_SP_CLIENT_SECRET }}
+      - name: Train model
+        uses: databricks/run-notebook@v0
+        id: train
+        with:
+          local-notebook-path: notebooks/Train.py
+          git-commit: ${{ github.event.pull_request.head.sha || github.sha }}
+          new-cluster-json: >
+            {
+              "spark_version": "11.0.x-cpu-ml-scala2.12",
+              "node_type_id": "${{ env.NODE_TYPE_ID }}",
+              "num_workers": 0,
+              "spark_conf": {
+                "spark.databricks.cluster.profile": "singleNode",
+                "spark.master": "local[*, 4]"
+              },
+              "custom_tags": {
+                "ResourceClass": "SingleNode"
+              }
+            }
+          access-control-list-json: >
+            [
+              {
+                "group_name": "users",
+                "permission_level": "CAN_VIEW"
+              }
+            ]
+          run-name: yang-mlops-project Integration Test
+          notebook-params-json: >
+            {
+              "env": "staging",
+              "test_mode": "True"
+            }            

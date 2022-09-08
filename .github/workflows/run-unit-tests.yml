@@ -1,0 +1,35 @@
+name: ML Code Unit Tests for yang-mlops-project
+on:
+  pull_request:
+    paths-ignore:
+      - 'databricks-config/**'
+  workflow_dispatch:
+jobs:
+  run-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+      - name: Install dependencies
+        run: |
+            python -m pip install --upgrade pip
+            pip install -r requirements.txt
+            pip install -r test-requirements.txt
+      - name: Run tests with pytest
+        run: pytest
+  # This job uses actionlint to run some checks on the GitHub workflow files. These checks include
+  # syntax, types, variable usage, and security.
+  # See https://github.com/rhysd/actionlint for more details.
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Download actionlint
+        id: get_actionlint
+        run: bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+        shell: bash
+      - name: Check workflow files
+        run: ${{ steps.get_actionlint.outputs.executable }} -color
+        shell: bash

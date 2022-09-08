@@ -1,0 +1,123 @@
+# This GitHub workflow deploys Terraform resources (ML resource config and more)
+# defined under databricks-config, when PRs are merged into the default branch
+name: Terraform Deployment for yang-mlops-project
+
+on:
+  push:
+    branches:
+      - 'main'
+    paths:
+      - 'databricks-config/**'
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: ./databricks-config
+
+jobs:
+  staging:
+    runs-on: ubuntu-20.04
+    env:
+      DATABRICKS_HOST: https://adb-8405830731420074.14.azuredatabricks.net
+      
+    steps:
+      - uses: actions/checkout@v3
+      - name: Generate AAD Token
+        run: ../.github/workflows/scripts/generate-aad-token.sh ${{ secrets.STAGING_AZURE_SP_TENANT_ID }} ${{ secrets.STAGING_AZURE_SP_APPLICATION_ID }} ${{ secrets.STAGING_AZURE_SP_CLIENT_SECRET }}
+      - uses: hashicorp/setup-terraform@v1
+      - name: Terraform fmt
+        id: fmt
+        run: terraform -chdir=staging fmt -check
+        continue-on-error: true
+      - name: Configure Terraform state backend authentication
+        run: |
+          # Below we assume you've run the setup scripts under the cicd-setup-scripts directory
+          # to create an Azure storage container and store its associated Azure ARM key as a Github Actions secret with
+          # name ARM_ACCESS_KEY. We set the ARM_ACCESS_KEY environment variable to authenticate to the azurerm
+          # backend as described in https://www.terraform.io/language/settings/backends/azurerm
+          echo "ARM_ACCESS_KEY=${{secrets.ARM_ACCESS_KEY}}" >> "$GITHUB_ENV"
+      - name: Terraform Init
+        id: init
+        run: terraform -chdir=staging init
+      - name: Terraform Validate
+        id: validate
+        run: terraform -chdir=staging validate
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform -chdir=staging plan -no-color \
+          -var="git_repo_url=${{ github.server_url }}/${{ github.repository }}"
+      - name: Terraform Apply
+        id: apply
+        run: |
+          terraform -chdir=staging apply -auto-approve \
+          -var="git_repo_url=${{ github.server_url }}/${{ github.repository }}"
+      - name: Terraform Output
+        id: output
+        run: terraform -chdir=staging output -json
+      - name: Commit Terraform Output to File
+        id: commit
+        run: |
+          mkdir -p output
+          echo '${{ steps.output.outputs.stdout }}' | jq '.' > output/staging.json
+          git config --global user.name 'Terraform Output Github Workflow'
+          git config --global user.email '<>'
+          output=$(git status --porcelain)
+          if [ -n "$output" ]
+          then
+            git add -A
+            git commit -m "Commit staging output"
+            git push
+          fi
+  prod:
+    needs: staging
+    runs-on: ubuntu-20.04
+    env:
+      DATABRICKS_HOST: https://adb-1005182519515014.14.azuredatabricks.net
+      
+    steps:
+      - uses: actions/checkout@v3
+      - name: Generate AAD Token
+        run: ../.github/workflows/scripts/generate-aad-token.sh ${{ secrets.PROD_AZURE_SP_TENANT_ID }} ${{ secrets.PROD_AZURE_SP_APPLICATION_ID }} ${{ secrets.PROD_AZURE_SP_CLIENT_SECRET }}
+      - uses: hashicorp/setup-terraform@v1
+      - name: Terraform fmt
+        id: fmt
+        run: terraform -chdir=prod fmt -check
+        continue-on-error: true
+      - name: Configure Terraform state backend authentication
+        run: |
+          echo "ARM_ACCESS_KEY=${{secrets.ARM_ACCESS_KEY}}" >> "$GITHUB_ENV"
+      - name: Terraform Init
+        id: init
+        run: terraform -chdir=prod init
+      - name: Terraform Validate
+        id: validate
+        run: terraform -chdir=prod validate
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform -chdir=prod plan -no-color \
+          -var="git_repo_url=${{ github.server_url }}/${{ github.repository }}"
+      - name: Terraform Apply
+        id: apply
+        run: |
+          terraform -chdir=prod apply -auto-approve \
+          -var="git_repo_url=${{ github.server_url }}/${{ github.repository }}"
+      - name: Terraform Output
+        id: output
+        run: terraform -chdir=prod output -json
+      - name: Commit Terraform Output to File
+        id: commit
+        run: |
+          git pull
+          mkdir -p output
+          echo '${{ steps.output.outputs.stdout }}' | jq '.' > output/prod.json
+          git config --global user.name 'Terraform Output Github Workflow'
+          git config --global user.email '<>'
+          output=$(git status --porcelain)
+          if [ -n "$output" ]
+          then
+            git add -A
+            git commit -m "Commit prod output"
+            git push
+          fi
